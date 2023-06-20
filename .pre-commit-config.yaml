@@ -1,0 +1,15 @@
+# See https://pre-commit.com for more information
+# See https://pre-commit.com/hooks.html for more hooks
+repos:
+-   repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v3.2.0
+    hooks:
+    -   id: trailing-whitespace
+    -   id: check-yaml
+    -   id: check-added-large-files
+        args: ['--maxkb=3000']
+-   repo: https://github.com/pycqa/flake8
+    rev: '6.0.0'
+    hooks:
+    -   id: flake8
+        args: ["--ignore=E501,E127,E128,F405,F403,E265,E266,E303,W292,W291,W293,E231,F401,W605,E501,E203,W504"]
