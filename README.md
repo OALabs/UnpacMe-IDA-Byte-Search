@@ -2,7 +2,7 @@
 [![UnpacMe](https://img.shields.io/badge/Threat_Hunting-UnpacMe-AA00B4)](https://www.unpac.me/) [![Chat](https://img.shields.io/badge/Support-Discord-5462EB)](https://discord.gg/cw4U3WHvpn)
 
 A search plugin for [UnpacMe](https://unpac.me/) to quickly find related malware samples and determine if a code block is a good
-candidate for a detection rule. The plugin searches both malicious files and our goodware corpus.  This allows an anlyst to quickly determine
+candidate for a detection rule. The plugin searches both malicious files and our goodware corpus.  This allows an analyst to quickly determine
 if the block of code belongs to a single known family, multiple families or if it is a common pattern found in goodware.
 
 **The plugin requires a valid API key for [UnpacMe](https://www.unpac.me/).**
