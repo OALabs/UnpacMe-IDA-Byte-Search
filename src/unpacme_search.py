@@ -749,7 +749,7 @@ class SearchHandler(ida_kernwin.action_handler_t):
                 search_bytes.append(' '.join(instr_string))
 
                 # TODO: Fix this. For undefined bytes or data, we can just grab the range as bytes.
-                next_offset = idc.next_head(offset, end+32)
+                next_offset = idc.next_head(offset, end + 32)
 
                 logger.debug(f"Next Offset: {hex(next_offset)}")
 
