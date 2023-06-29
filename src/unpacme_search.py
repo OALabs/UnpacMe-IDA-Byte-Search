@@ -413,9 +413,12 @@ class UnpacMeResultWidget(idaapi.PluginForm):
             family_lower = []
             for entry in result['malwareid']:
 
-                if entry['malware_family'].lower() not in family_lower:
-                    family_lower.append(entry['malware_family'].lower())
-                    malware_family.append(entry['malware_family'])
+                try:
+                    if entry['malware_family'].lower() not in family_lower:
+                        family_lower.append(entry['malware_family'].lower())
+                        malware_family.append(entry['malware_family'])
+                except AttributeError:
+                    logger.debug("No malware family")
 
                 if entry['type'] == 'unpacme':
                     if not classification_type:
