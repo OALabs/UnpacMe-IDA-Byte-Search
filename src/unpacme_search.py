@@ -128,7 +128,7 @@ log_stream.setFormatter(formatter)
 # probably bug here?
 logger.addHandler(log_stream)
 
-BAD = [0xffffffff, 0xffffffffffffffff]
+BAD_OFFSETS = [0xffffffff, 0xffffffffffffffff]
 
 
 class SearchPreview(QDialog):
@@ -626,7 +626,7 @@ class SearchHandler(ida_kernwin.action_handler_t):
         start = idc.read_selection_start()
         end = idc.read_selection_end()
 
-        if start in BAD or end in BAD:
+        if start in BAD_OFFSETS or end in BAD_OFFSETS:
             logger.debug("Nothing selected")
             idc.warning("Nothing Selected!")
             return
@@ -643,6 +643,7 @@ class SearchHandler(ida_kernwin.action_handler_t):
         search_bytes = []
         iterations = 0
         logger.debug(f'Start: {hex(start)} End: {hex(end)}')
+
         while offset < end:
             iterations += 1
             if iterations > 100:
@@ -750,10 +751,14 @@ class SearchHandler(ida_kernwin.action_handler_t):
                 # TODO: Fix this. For undefined bytes or data, we can just grab the range as bytes.
                 next_offset = idc.next_head(offset, end+32)
 
-                if next_offset < 0xffffffff and next_offset >= end:
+                logger.debug(f"Next Offset: {hex(next_offset)}")
+
+                #if next_offset < bad_offset and next_offset >= end:
+                if next_offset not in BAD_OFFSETS and next_offset >= end:
                     break
 
-                if next_offset >= 0xfffffff:
+                #if next_offset >= bad_offset:
+                if next_offset in BAD_OFFSETS:
                     logger.debug("IDA has wrong offset..manually set")
                     offset += 1
                 else:
@@ -839,7 +844,7 @@ class UnpacMeByteSearchPlugin(ida_idaapi.plugin_t):
     wanted_name = "UnpacMe Byte Search"
     wanted_hotkey = ""
 
-    _version = 1.00
+    _version = 1.01
 
     def _banner(self):
         return f"""
