@@ -847,7 +847,7 @@ class UnpacMeByteSearchPlugin(ida_idaapi.plugin_t):
     wanted_name = "UnpacMe Byte Search"
     wanted_hotkey = ""
 
-    _version = 1.01
+    _version = "1.0.1"
 
     def _banner(self):
         return f"""
