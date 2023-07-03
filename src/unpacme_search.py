@@ -128,7 +128,6 @@ log_stream.setFormatter(formatter)
 # probably bug here?
 logger.addHandler(log_stream)
 
-BAD_OFFSETS = [0xffffffff, 0xffffffffffffffff]
 
 
 class SearchPreview(QDialog):
@@ -151,6 +150,8 @@ class SearchPreview(QDialog):
         self.btn_search.clicked.connect(self.accept)
         self.btn_cancel = QPushButton("Cancel", self)
         self.btn_cancel.clicked.connect(self.reject)
+        self.btn_export = QPushButton("Export", self)
+        self.btn_export.clicked.connect(self.export_yara)
 
         search_query = "\n".join(search_list)
 
@@ -166,13 +167,46 @@ class SearchPreview(QDialog):
         layout_buttons = QHBoxLayout()
         layout_buttons.addWidget(self.btn_cancel)
         layout_buttons.addWidget(self.btn_search)
+        layout_buttons.addWidget(self.btn_export)
 
         layout.addLayout(layout_view)
         layout.addLayout(layout_buttons)
         self.setLayout(layout)
 
     def get_search_pattern(self):
-        return self.edit_search.toPlainText().replace("\n", "")
+        return self.edit_search.toPlainText().replace("\n", " ")
+
+    def export_yara(self):
+        idb_path = idc.get_idb_path()
+        import sys
+        import os
+        if sys.version_info[0] < 3.4:
+            import pathlib
+            suffix = pathlib.Path(idb_path).suffix
+        else:
+            suffix = os.path.splitext(idb_path)[1]
+        yara_path = idb_path.replace(suffix, ".yara")
+        if not yara_path:
+            logger.warning("could not export yara rule")
+            return
+        out_data = ""
+        with open(yara_path, "w") as export_yara:
+            out_data = self.generate_yara_rule()
+            export_yara.write(out_data)
+            logger.info("Exported yara rule to %s" % yara_path)
+
+    def generate_yara_rule(self):
+        byte_search = self.get_search_pattern()
+        yara_rule = """
+rule unpacme {
+    // IDB: %s 
+    // File: %s
+    strings:
+        $byte_pattern = { %s }
+    condition:
+        $byte_pattern 
+}""" % (idc.get_idb_path(), idc.get_input_file_path(), byte_search)
+        return yara_rule
 
 
 class GoodwareView(QDialog):
@@ -629,7 +663,7 @@ class SearchHandler(ida_kernwin.action_handler_t):
         start = idc.read_selection_start()
         end = idc.read_selection_end()
 
-        if start in BAD_OFFSETS or end in BAD_OFFSETS:
+        if start == idc.BADADDR or end == idc.BADADDR:
             logger.debug("Nothing selected")
             idc.warning("Nothing Selected!")
             return
@@ -699,7 +733,7 @@ class SearchHandler(ida_kernwin.action_handler_t):
                     # wild card instruction
                     if op1.offb == 0 and op2.offb == 0:
                         logger.debug("Wildcarding entire instruction")
-                        instr_string.append("?? " * int(instruction_size))
+                        instr_string.append("??" * int(instruction_size))
                         continue
 
                     # wildcard instruction with op1
@@ -710,20 +744,20 @@ class SearchHandler(ida_kernwin.action_handler_t):
                     logger.debug(f"op1_size: {op1_size}")
 
                     if op1.offb == 0:
-                        instr_string.append("?? " * int(op1_size))
+                        instr_string.append("??" * int(op1_size))
                     else:
                         logger.debug("Getting op")
                         logger.debug(f"ibytes: {ibytes}")
                         for b in ibytes[:op1.offb]:
                             instr_string.append("{0:02x}".format(b))
 
-                        instr_string.append("?? " * int(op1_size))
+                        instr_string.append("??" * int(op1_size))
 
                     # continue
                     if op2.offb > 0:
                         if op2.type in self.wildcard_types:
                             logger.debug("Wildcarding op2")
-                            instr_string.append("?? " * int(instruction_size - op2.offb))
+                            instr_string.append("??" * int(instruction_size - op2.offb))
                         else:
                             for b in ibytes[op2.offb:]:
                                 instr_string.append("{0:02x}".format(b))
@@ -736,7 +770,7 @@ class SearchHandler(ida_kernwin.action_handler_t):
 
                     if op2.offb == 0:
                         logger.debug("Wildcarding op2")
-                        instr_string.append("?? " * ins.size)
+                        instr_string.append("??" * ins.size)
                         continue
 
                     # emit all bytes up to the start of op2
@@ -745,7 +779,7 @@ class SearchHandler(ida_kernwin.action_handler_t):
                         instr_string.append("{0:02x}".format(b))
 
                     op2_size = instruction_size - op2.offb
-                    instr_string.append("?? " * int(op2_size))
+                    instr_string.append("??" * int(op2_size))
             except Exception as ex:
                 logger.error(f"Exception: {ex}")
             finally:
@@ -757,11 +791,11 @@ class SearchHandler(ida_kernwin.action_handler_t):
                 logger.debug(f"Next Offset: {hex(next_offset)}")
 
                 #if next_offset < bad_offset and next_offset >= end:
-                if next_offset not in BAD_OFFSETS and next_offset >= end:
+                if next_offset != idc.BADADDR and next_offset >= end:
                     break
 
                 #if next_offset >= bad_offset:
-                if next_offset in BAD_OFFSETS:
+                if next_offset == idc.BADADDR:
                     logger.debug("IDA has wrong offset..manually set")
                     offset += 1
                 else:
