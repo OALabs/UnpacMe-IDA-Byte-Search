@@ -17,8 +17,9 @@ import webbrowser
 import os
 
 from PyQt5.QtCore import Qt, QByteArray
-from PyQt5.QtWidgets import QDialog, QVBoxLayout, QLabel, QPushButton, QHBoxLayout, QGridLayout, QFormLayout, QLineEdit, QTextEdit, QTableWidget, QTableWidgetItem, QHeaderView, QComboBox, QCheckBox, QFrame
-from PyQt5.QtGui import QColor, QPixmap, QPainter, QIcon, QFontMetrics, QGuiApplication
+from PyQt5.QtWidgets import QDialog, QVBoxLayout, QLabel, QPushButton, QHBoxLayout, QGridLayout, QFormLayout, \
+    QLineEdit, QTextEdit, QTableWidget, QTableWidgetItem, QHeaderView, QComboBox, QCheckBox, QFrame, QApplication, QShortcut
+from PyQt5.QtGui import QColor, QPixmap, QPainter, QIcon, QFontMetrics, QGuiApplication, QKeySequence
 
 
 logger = logging.getLogger("UnpacMeSearch")
@@ -172,7 +173,9 @@ class SearchPreview(QDialog):
         self.setLayout(layout)
 
     def get_search_pattern(self):
-        return self.edit_search.toPlainText().replace("\n", "")
+        search_pattern = self.edit_search.toPlainText().replace("\n", "").replace(" ", "")
+        search_pattern = ' '.join([search_pattern[i:i + 2] for i in range(0, len(search_pattern), 2)])
+        return search_pattern
 
 
 class GoodwareView(QDialog):
@@ -306,11 +309,33 @@ class UnpacMeResultWidget(idaapi.PluginForm):
         self.results = results
         self.goodware_hashes = []
         self.id_map = {}
+        self.result_table = None
 
     def OnCreate(self, form):
         self.parent = self.FormToPyQtWidget(form)
-        # self.FormSetTitle("UnpacMe Results")
         self.PopulateForm()
+
+    def copy_selected_cells(self) -> None:
+
+        if not self.result_table:
+            return
+
+        selection = self.result_table.selectedRanges()
+
+        selected_result = ""
+        if not selection:
+            logger.debug("No selection")
+            return
+
+        for r in range(selection[0].topRow(), selection[0].bottomRow() + 1):
+            for c in range(selection[0].leftColumn(), selection[0].rightColumn() + 1):
+                try:
+                    selected_result += str(self.result_table.item(r, c).text()) + "\t"
+                except AttributeError:
+                    selected_result += "\n"
+            selected_result = selected_result[:-1] + "\n"
+
+        QApplication.clipboard().setText(selected_result)
 
     def handle_click(self, item):
 
@@ -357,8 +382,11 @@ class UnpacMeResultWidget(idaapi.PluginForm):
         if len(self.search_term) > 16:
             search_term = self.search_term[:16] + "..."
 
-        btn_copy = QPushButton("Copy Pattern")
+        btn_copy = QPushButton("Copy Search Pattern")
         btn_copy.clicked.connect(self.copy_text_to_clipboard)
+
+        btn_copy_selected = QPushButton("Copy Selected Results")
+        btn_copy_selected.clicked.connect(self.copy_selected_cells)
 
         summary_layout.addRow(QLabel("Search Term:"), QLabel(search_term))
         summary_layout.addRow(QLabel("Matches:"), QLabel(f"{self.results['result_count']}"))
@@ -371,17 +399,21 @@ class UnpacMeResultWidget(idaapi.PluginForm):
         line.setFrameShadow(QFrame.Sunken)
         summary_layout.addRow(line)
         summary_layout.addRow(btn_copy)
+        summary_layout.addRow(btn_copy_selected)
         summary_layout.setVerticalSpacing(0)
         summary_pane.addLayout(summary_layout)
 
-        result_table = QTableWidget()
-        result_table.setRowCount(0)
-        result_table.setColumnCount(6)
-        result_table.itemDoubleClicked.connect(self.handle_click)
-        result_table.setSortingEnabled(True)
-        result_table.setMinimumHeight(600)
+        self.result_table = QTableWidget()
 
-        result_table.setHorizontalHeaderLabels(["Classification",
+        self.result_table.setRowCount(0)
+
+        self.result_table.setColumnCount(6)
+        self.result_table.itemDoubleClicked.connect(self.handle_click)
+
+        self.result_table.setSortingEnabled(True)
+        self.result_table.setMinimumHeight(600)
+
+        self.result_table.setHorizontalHeaderLabels(["Classification",
                                                 "Malware Family",
                                                 "Labels",
                                                 "Threat Type",
@@ -392,7 +424,7 @@ class UnpacMeResultWidget(idaapi.PluginForm):
         last_row = 0
         for row, result in enumerate(results):
             last_row = row
-            result_table.insertRow(row)
+            self.result_table.insertRow(row)
             try:
                 self.id_map[result['sha256']] = {
                     'id': result["analysis"][0]["id"],
@@ -404,8 +436,8 @@ class UnpacMeResultWidget(idaapi.PluginForm):
             sha256_item = QTableWidgetItem(result['sha256'])
             sha256_item.setToolTip("View latest Analysis on UnpacMe")
 
-            result_table.setItem(row, 4, QTableWidgetItem(sha256_item))
-            result_table.setItem(row, 5, QTableWidgetItem(str(datetime.fromtimestamp(result['last_seen']).strftime('%Y-%m-%d'))))
+            self.result_table.setItem(row, 4, QTableWidgetItem(sha256_item))
+            self.result_table.setItem(row, 5, QTableWidgetItem(str(datetime.fromtimestamp(result['last_seen']).strftime('%Y-%m-%d'))))
             malware_family = []
             classification_type = ""
             threat_type = ""
@@ -437,8 +469,8 @@ class UnpacMeResultWidget(idaapi.PluginForm):
                 label_str = ""
             family_widget = QTableWidgetItem(family_str)
             family_widget.setToolTip("Search for malware family on UnpacMe.")
-            result_table.setItem(row, 1, family_widget)
-            result_table.setItem(row, 2, QTableWidgetItem(label_str))
+            self.result_table.setItem(row, 1, family_widget)
+            self.result_table.setItem(row, 2, QTableWidgetItem(label_str))
 
             # if there is no set classificaiton type, but
             # there are applied labels (i.e. malpedia) set the classification type to malicious
@@ -460,8 +492,8 @@ class UnpacMeResultWidget(idaapi.PluginForm):
 
             ct_widget.setForeground(QColor(255, 255, 255))
 
-            result_table.setItem(row, 0, ct_widget)
-            result_table.setItem(row, 3, QTableWidgetItem(threat_type))
+            self.result_table.setItem(row, 0, ct_widget)
+            self.result_table.setItem(row, 3, QTableWidgetItem(threat_type))
 
         if self.results['goodware_results']:
             self.goodware_row_start = last_row + 1
@@ -473,21 +505,21 @@ class UnpacMeResultWidget(idaapi.PluginForm):
                     'metadata': result
                 }
 
-                result_table.insertRow(row)
+                self.result_table.insertRow(row)
                 ct_widget = QTableWidgetItem("GOODWARE")
                 # 228B22
                 ct_widget.setBackground(QColor(34, 139, 34))
                 ct_widget.setForeground(QColor(255, 255, 255))
-                result_table.setItem(row, 0, ct_widget)
+                self.result_table.setItem(row, 0, ct_widget)
                 sha256_item = QTableWidgetItem(result['sha256'])
                 sha256_item.setToolTip("View details...")
-                result_table.setItem(row, 4, sha256_item)
+                self.result_table.setItem(row, 4, sha256_item)
                 goodware_matches += 1
 
-        result_table.resizeRowsToContents()
-        result_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.result_table.resizeRowsToContents()
+        self.result_table.setEditTriggers(QTableWidget.NoEditTriggers)
 
-        header = result_table.horizontalHeader()
+        header = self.result_table.horizontalHeader()
         header.setSectionResizeMode(QHeaderView.ResizeToContents)
 
         count_summary_layout = QFormLayout()
@@ -510,7 +542,7 @@ class UnpacMeResultWidget(idaapi.PluginForm):
         # Add the summary pane to the main layout
         layout.addLayout(summary_pane, Qt.AlignLeft)
 
-        layout.addWidget(result_table, Qt.AlignLeft)
+        layout.addWidget(self.result_table, Qt.AlignLeft)
         layout.setAlignment(Qt.AlignLeft | Qt.AlignTop)
         layout.addStretch(1)
 
@@ -558,7 +590,9 @@ class UnpacMeSearch(object):
             logger.debug(f"Status: {search_response.status_code}")
 
             if search_response.status_code == 404:
+
                 jres = search_response.json()
+                logger.debug(jres)
                 if "warning" in jres.keys():
                     idc.warning(jres['warning'])
                 idc.warning("No results found for the pattern.")
@@ -620,32 +654,13 @@ class SearchHandler(ida_kernwin.action_handler_t):
     def update(self, ctx):
         return ida_kernwin.AST_ENABLE_ALWAYS
 
-    def activate(self, ctx):
-        # Delay loading of the UnpacMeSearch class until we need it
-        # This prevents possible password prompt on IDA startup to access the keystore
-        if self.unpacme_search is None:
-            self.unpacme_search = UnpacMeSearch(keyring.get_password('unpacme', 'api_key'))
 
-        start = idc.read_selection_start()
-        end = idc.read_selection_end()
-
-        if start in BAD_OFFSETS or end in BAD_OFFSETS:
-            logger.debug("Nothing selected")
-            idc.warning("Nothing Selected!")
-            return
-
-        if start > end:
-            logger.debug("Start is greater than end")
-            idc.warning("Start is greater than end")
-            return
-
-        offset = start
-
+    def _process_selected_code_range(self, start, end):
+        iterations = 0
+        search_bytes = []
         code_block = ""
 
-        search_bytes = []
-        iterations = 0
-        logger.debug(f'Start: {hex(start)} End: {hex(end)}')
+        offset = start
 
         while offset < end:
             iterations += 1
@@ -686,7 +701,8 @@ class SearchHandler(ida_kernwin.action_handler_t):
                 logger.debug(idc.generate_disasm_line(offset, 0))
                 code_block += f"\t{idc.generate_disasm_line(offset, 0)}\n"
 
-                if (op1.type not in self.wildcard_types and op2.type not in self.wildcard_types) or not self.auto_wildcard:
+                if (
+                        op1.type not in self.wildcard_types and op2.type not in self.wildcard_types) or not self.auto_wildcard:
                     logger.debug("No wildcards")
                     ibytes = idc.get_bytes(cur_offset, instruction_size, 0)
                     for b in ibytes:
@@ -749,43 +765,90 @@ class SearchHandler(ida_kernwin.action_handler_t):
             except Exception as ex:
                 logger.error(f"Exception: {ex}")
             finally:
-                search_bytes.append(' '.join(instr_string))
 
-                # TODO: Fix this. For undefined bytes or data, we can just grab the range as bytes.
-                next_offset = idc.next_head(offset, end + 32)
+                instruction_byte_string = ''.join(instr_string)
+                instruction_byte_string = instruction_byte_string.replace(" ", "")
+                instruction_byte_string = ' '.join(instruction_byte_string[i:i + 2] for i in range(0, len(instruction_byte_string), 2))
+
+                search_bytes.append(''.join(instruction_byte_string))
+
+                next_offset = idc.next_head(offset, end)
 
                 logger.debug(f"Next Offset: {hex(next_offset)}")
 
-                #if next_offset < bad_offset and next_offset >= end:
-                if next_offset not in BAD_OFFSETS and next_offset >= end:
+                if next_offset >= end:
                     break
 
-                #if next_offset >= bad_offset:
                 if next_offset in BAD_OFFSETS:
-                    logger.debug("IDA has wrong offset..manually set")
-                    offset += 1
-                else:
-                    offset = next_offset
+                    break
 
+                offset = next_offset
                 logger.debug(f"Next Offset: {hex(offset)}")
 
-        hex_str = ' '.join(search_bytes)
-        logger.debug(f"Search Bytes: {hex_str}")
+        return search_bytes, code_block
+
+    def activate(self, ctx):
+        # Delay loading of the UnpacMeSearch class until we need it
+        # This prevents possible password prompt on IDA startup to access the keystore
+        if self.unpacme_search is None:
+            self.unpacme_search = UnpacMeSearch(keyring.get_password('unpacme', 'api_key'))
+
+        start = idc.read_selection_start()
+        end = idc.read_selection_end()
+
+        if start in BAD_OFFSETS or end in BAD_OFFSETS:
+            logger.debug("Nothing selected")
+            idc.warning("Nothing Selected!")
+            return
+
+        if start > end:
+            logger.debug("Start is greater than end")
+            idc.warning("Start is greater than end")
+            return
+
+        code_block = ""
+        search_bytes = []
+        logger.debug(f'Start: {hex(start)} End: {hex(end)}')
+
+        flags = ida_bytes.get_full_flags(start)
+        if not ida_bytes.is_code(flags):
+            size = end - start
+            logger.debug(f"Selected data size: {size}")
+            ibytes = idc.get_bytes(start, size, False)
+            for b in ibytes:
+                search_bytes.append("{0:02x}".format(b))
+
+        else:
+            search_bytes, code_block = self._process_selected_code_range(start, end)
+
+        search_str = ''.join(search_bytes)
+        search_str = search_str.replace(" ", "")
+        hex_str = ' '.join(search_str[i:i + 2] for i in range(0, len(search_str), 2))
 
         if self.preview:
             dialog = SearchPreview(search_bytes, code_block)
             preview_result = dialog.exec_()
 
             if preview_result == QDialog.Accepted:
+                logger.debug(f"Search Bytes: {hex_str}")
                 hex_str = dialog.get_search_pattern()
+
+                if not hex_str:
+                    logger.error("No bytes to search")
+                    idc.warning("No bytes to search")
+                    return
+
                 result = self.unpacme_search.search(hex_str, "hex", self.search_goodware)
             else:
                 return
         else:
+            if not hex_str:
+                logger.error("No bytes to search")
+                idc.warning("No bytes to search")
+
             result = self.unpacme_search.search(hex_str, "hex", self.search_goodware)
 
         if result:
-
 
             label_map = {}
             classification_map = {}
@@ -847,7 +910,7 @@ class UnpacMeByteSearchPlugin(ida_idaapi.plugin_t):
     wanted_name = "UnpacMe Byte Search"
     wanted_hotkey = ""
 
-    _version = "1.0.1"
+    _version = "1.0.2"
 
     def _banner(self):
         return f"""

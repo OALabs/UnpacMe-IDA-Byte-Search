@@ -40,6 +40,8 @@ The results window shows a summary of the search results, followed by a table of
 good candidate for a rule, you can quickly copy it use the `Copy Pattern` button.  To view the analysis of a file simply
 click on the SHA256 hash within the table to open a new browser tab to the analysis on [UnpacMe](https://www.unpac.me).
 
+To copy results simply select any of the desired cells and click the `Copy Selected Results` button. 
+
 <p align="center">
     <img width="600" alt="Example Results" src="imgs/example_results.gif?raw=true">
 </p>
@@ -65,5 +67,11 @@ to store the API token within the system keyring.
    - Immediate Far Address
    - Immediate Near Address
  - **Search Goodware** - When set the plugin will also search the UnpacMe Goodware corpus.
+
+## Troubleshooting and Support 
+
+If you run into issues using the plugin, please let us know either via [Discord](https://discord.gg/cw4U3WHvpn) or by opening an issue on this repo.
+
+
 
 

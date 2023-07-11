@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.2 - 2023-07-11
+
+### Added
+ - Copy results from the results window
+
+### Changed
+ - Code cleanup
 
 ## 1.0.1 - 2023-07-02
 
