@@ -36,11 +36,14 @@ When the `Search Preview` option is enabled, the plugin will display a preview o
 
 ### String Searching 
 
-To search for a specific string select the string within the _Strings subview_ or the address where is referenced. 
+To search for a specific string, you can either select the string within the _Strings subview_ or the address where the 
+string is referenced and right click to search. 
 
 <p align="center">
     <img width="600" alt="String Search" src="imgs/string_search_example.png?raw=true">
 </p>
+
+You can also search for a specific string by selecting the address where the string is referenced and searching. 
 
 
 ### Results
