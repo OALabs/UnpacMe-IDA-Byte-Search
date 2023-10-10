@@ -8,6 +8,8 @@ import ida_diskio
 import ida_bytes
 import idc
 import ida_ua
+import ida_nalt
+import idautils
 import json
 import logging
 import requests
@@ -15,6 +17,8 @@ import keyring
 from datetime import datetime
 import webbrowser
 import os
+from typing import Dict, Any, Tuple
+import time
 
 from PyQt5.QtCore import Qt, QByteArray
 from PyQt5.QtWidgets import QDialog, QVBoxLayout, QLabel, QPushButton, QHBoxLayout, QGridLayout, QFormLayout, \
@@ -179,7 +183,7 @@ class SearchPreview(QDialog):
 
 
 class GoodwareView(QDialog):
-    def __init__(self, sha256, metadata, parent=None):
+    def __init__(self, metadata, parent=None):
         super(GoodwareView, self).__init__(parent)
 
         self.setWindowTitle("Goodware Details")
@@ -207,7 +211,6 @@ class GoodwareView(QDialog):
 
         self.lbl_linker_version = QLabel("Linker Version:")
         self.lbl_linker_version_val = QLabel(metadata['linker_version'])
-
 
         form_layout.addRow(self.lbl_sha256, self.lbl_sha256_val)
         form_layout.addRow(self.lbl_name, self.lbl_name_val)
@@ -303,7 +306,7 @@ class UnpacMeSearchConfigDialog(QDialog):
 
 class UnpacMeResultWidget(idaapi.PluginForm):
 
-    def __init__(self, search_term: str, results: dict):
+    def __init__(self, search_term: str, results: Dict[str, Any]):
         super(UnpacMeResultWidget, self).__init__()
         self.search_term = search_term
         self.results = results
@@ -345,7 +348,7 @@ class UnpacMeResultWidget(idaapi.PluginForm):
                 webbrowser.open(f"https://www.unpac.me/results/{self.id_map[item.text()]['id']}?hash={item.text()}")
                 return
 
-            gwv = GoodwareView(item.text(), self.id_map[item.text()]['metadata'])
+            gwv = GoodwareView(self.id_map[item.text()]['metadata'])
             gwv.exec_()
 
         elif item.column() == 1:
@@ -430,8 +433,9 @@ class UnpacMeResultWidget(idaapi.PluginForm):
                     'id': result["analysis"][0]["id"],
                     'malware': True
                 }
-            except Exception as wtf:
-                print(wtf)
+            except Exception as pex:
+                logger.error(f"Error parsing results.. Error: {pex}")
+                logger.error(result)
 
             sha256_item = QTableWidgetItem(result['sha256'])
             sha256_item.setToolTip("View latest Analysis on UnpacMe")
@@ -560,34 +564,32 @@ class UnpacMeResultWidget(idaapi.PluginForm):
 
 
 class UnpacMeSearch(object):
-    """
 
-    """
     def __init__(self, api_key):
         self.api_key = f"Key {api_key}"
         self.base_site = "https://api.unpac.me/api/"
         self.api_version = "v1"
         self.search_endpoint = "/private/search/term/"
-        self.search_types = {"hex": "string.hex",
+        self.search_types = {"hex": "bytes",
                              "ascii": "string.ascii",
                              "wide": "string.wide"
                              }
 
-    def search(self, data: str, type: str, search_goodware=False) -> dict:
+    def _search(self, data: str, type: str, search_goodware=False) -> Dict[str, Any]:
         try:
-
-            ida_kernwin.show_wait_box("Searching...")
-
             url = f"{self.base_site}{self.api_version}{self.search_endpoint}{self.search_types[type]}"
-
             auth_header = {'Authorization': self.api_key}
-            logger.debug(f"URL: {url}")
             search_data = {'value': data}
-            logger.debug(f"Search Data: {search_data}")
 
+            if search_goodware:
+                search_data['repo_type'] = 'goodware'
+
+            logger.debug(f"Search Data: {search_data}")
+            logger.debug("Calling Unpac.me API endpoint")
+            logger.debug(f"URL: {url}")
             search_response = requests.post(url, json=search_data, headers=auth_header)
-            ida_kernwin.replace_wait_box("Processing results.")
-            logger.debug(f"Status: {search_response.status_code}")
+            if search_goodware:
+                logger.debug(search_response.json())
 
             if search_response.status_code == 404:
 
@@ -595,7 +597,7 @@ class UnpacMeSearch(object):
                 logger.debug(jres)
                 if "warning" in jres.keys():
                     idc.warning(jres['warning'])
-                idc.warning("No results found for the pattern.")
+
                 return {}
 
             if search_response.status_code != 200:
@@ -603,43 +605,106 @@ class UnpacMeSearch(object):
                 idc.warning(f"Unexpected response from UnpacMe...please try again. Code: {search_response.status_code}")
                 return {}
 
-            search_results = search_response.json()
-
-            if not search_goodware:
-                search_results['goodware_results'] = []
-                search_results['matched_goodware_files'] = 0
-                return search_results
-
-            logger.debug("Searching Goodware")
-            ida_kernwin.replace_wait_box("Searching goodware...")
-            search_data['repo_type'] = 'goodware'
-            gw_result = requests.post(url, json=search_data, headers=auth_header)
-            ida_kernwin.replace_wait_box("Processing results...")
-
-            if gw_result.status_code == 200:
-                search_results['goodware_results'] = gw_result.json()['goodware_results']
-                search_results['matched_goodware_files'] = gw_result.json()['matched_goodware_files']
-            elif gw_result.status_code == 404:
-                search_results['goodware_results'] = []
-                search_results['matched_goodware_files'] = 0
-            else:
-                logger.error(f"Error while searching ..{gw_result.status_code}")
-                idc.warning("Unexpected response from UnpacMe...please try again")
-                search_results['goodware_results'] = []
-                search_results['matched_goodware_files'] = 0
-
-            return search_results
+            return search_response.json()
         except Exception as ex:
             logger.error(f"Error making request {ex}")
-            idc.warning(f"Unexpected error UnpacMe...please try again. {ex}")
+            idc.warning(f"Unexpected error UnpacMe...please try again. Error: {ex}")
+
+    def search(self, data: str, type: str) -> Dict[str, Any]:
+        try:
+            ida_kernwin.show_wait_box("HIDECANCEL\nSearching...")
+            time.sleep(0.5)
+            search_results = self._search(data, type, search_goodware=False)
+            return search_results
+        finally:
+            ida_kernwin.hide_wait_box()
+
+    def search_goodware(self, data: str, type: str) -> Dict[str, Any]:
+        try:
+            ida_kernwin.show_wait_box("HIDECANCEL\nSearching Goodware...")
+            time.sleep(0.5)
+            search_results = {
+                'goodware_results': [],
+                'matched_goodware_files': 0
+            }
+            search_results.update(self._search(data, type, search_goodware=True))
+            return search_results
         finally:
             ida_kernwin.hide_wait_box()
 
 
-class SearchHandler(ida_kernwin.action_handler_t):
+class BaseSearchHandler(ida_kernwin.action_handler_t):
+    def __init__(self):
+        super(BaseSearchHandler, self).__init__()
+        self.unpacme_search = None
+        self.result_widget = None
+
+    def build_result(self, result: Dict[str, Any], search_string: str):
+
+        if not result or 'results' not in result.keys():
+            idc.warning("No results found for the pattern.")
+            return False
+
+        label_map = {}
+        classification_map = {}
+
+        for r in result['results']:
+            classification_type = ""
+            family = ""
+            for entry in r['malwareid']:
+
+                label = entry['malware_family']
+                if not family:
+                    family = label
+
+                classification = entry['classification_type']
+                if classification:
+                    classification_type = classification
+
+            if not classification_type:
+                classification_type = 'UNKNOWN'
+
+            if family in label_map:
+                label_map[family] += 1
+            else:
+                label_map[family] = 1
+
+            if classification_type in classification_map:
+                classification_map[classification_type] += 1
+            else:
+                classification_map[classification_type] = 1
+        try:
+            classification_map['GOODWARE'] = result['matched_goodware_files']
+        except KeyError:
+            classification_map['GOODWARE'] = 0
+
+        result['label_map'] = label_map
+        result['classification_map'] = classification_map
+        logger.info(classification_map)
+        logger.info(label_map)
+
+        if self.result_widget:
+            self.result_widget.Close(ida_kernwin.PluginForm.WCLS_CLOSE_LATER)
+
+        self.result_widget = UnpacMeResultWidget(search_string, result)
+        self.result_widget.Show("UnpacMe Search")
+        if "warning" in result.keys():
+            idc.warning(result['warning'])
+
+    def activate(self, ctx):
+        # Delay loading of the UnpacMeSearch class until we need it
+        # This prevents possible password prompt on IDA startup to access the keystore
+        if self.unpacme_search is None:
+            self.unpacme_search = UnpacMeSearch(keyring.get_password('unpacme', 'api_key'))
+
+    def update(self, ctx):
+        pass
+
+
+class SearchHandler(BaseSearchHandler):
 
     def __init__(self, preview, auto_wildcard, search_goodware):
-        ida_kernwin.action_handler_t.__init__(self)
+        super(SearchHandler, self).__init__()
 
         self.unpacme_search = None
 
@@ -652,8 +717,10 @@ class SearchHandler(ida_kernwin.action_handler_t):
         self.result_widget = None
 
     def update(self, ctx):
-        return ida_kernwin.AST_ENABLE_ALWAYS
 
+        if ida_kernwin.get_widget_type(ctx.widget) in [ida_kernwin.BWN_DISASM, ida_kernwin.BWN_PSEUDOCODE, ida_kernwin.BWN_DUMP]:
+            return ida_kernwin.AST_ENABLE_FOR_WIDGET
+        return ida_kernwin.AST_DISABLE_FOR_WIDGET
 
     def _process_selected_code_range(self, start, end):
         iterations = 0
@@ -787,119 +854,230 @@ class SearchHandler(ida_kernwin.action_handler_t):
 
         return search_bytes, code_block
 
-    def activate(self, ctx):
-        # Delay loading of the UnpacMeSearch class until we need it
-        # This prevents possible password prompt on IDA startup to access the keystore
-        if self.unpacme_search is None:
-            self.unpacme_search = UnpacMeSearch(keyring.get_password('unpacme', 'api_key'))
+    def _is_string_lit(self, address: int) -> bool:
+        flags = ida_bytes.get_flags(address)
+        is_strlit = ida_bytes.is_strlit(flags)
+
+        if is_strlit:
+            return True
+
+        insn = idaapi.insn_t()
+        idaapi.decode_insn(insn, address)
+        logger.debug("Checking ops")
+        for op in [0, 1]:
+            logger.debug(f"Op Type {insn.ops[op].type}")
+
+            if insn.ops[op].type in [idaapi.o_far, idaapi.o_imm]:
+                string_addr = insn.ops[op].addr
+
+                if insn.ops[op].type == idaapi.o_imm:
+                    string_addr = insn.ops[0].value
+                    logger.debug(f"String Address: {hex(string_addr)}")
+
+                if not string_addr:
+                    continue
+
+                # Check if it's a string
+                if idaapi.is_strlit(idaapi.get_flags(string_addr)):
+                    logger.debug(f"Reference to string literal at {hex(string_addr)}")
+                    return True
+
+        return False
+
+    def _get_string_lit(self, address: int) -> Tuple[str, int]:
+        try:
+
+            flags = ida_bytes.get_flags(address)
+            is_strlit = ida_bytes.is_strlit(flags)
+            if is_strlit:
+                string_type = idc.get_str_type(address)
+                size = ida_bytes.get_max_strlit_length(address, string_type)
+                logger.debug(f"String Type: {string_type}, String Size {size}")
+                string_data = ida_bytes.get_strlit_contents(address, size, string_type)
+                return string_data.decode('utf-8'), string_type
+
+            insn = idaapi.insn_t()
+            idaapi.decode_insn(insn, address)
+            logger.debug("Checking ops")
+
+            string_data = ""
+            string_type = 0
+
+            for op in [0, 1]:
+                logger.debug(f"Op Type {insn.ops[op].type}")
+                if insn.ops[op].type in [idaapi.o_far, idaapi.o_imm]:
+                    string_addr = insn.ops[op].addr
+
+                    if insn.ops[op].type == idaapi.o_imm:
+                        string_addr = insn.ops[0].value
+                        logger.debug(f"String Address: {hex(string_addr)}")
+
+                    if not string_addr:
+                        continue
+
+                    # Check if it's a string
+                    if not idaapi.is_strlit(idaapi.get_flags(string_addr)):
+                        continue
+
+                    string_type = idc.get_str_type(string_addr)
+
+                    size = ida_bytes.get_max_strlit_length(string_addr, string_type)
+                    string_data = ida_bytes.get_strlit_contents(string_addr, size, string_type)
+
+            return string_data.decode('utf-8'), string_type
+
+
+        except Exception as ex:
+            logger.error(f"Error getting string literal {ex}")
+            return "", 0
+
+    def activate(self, ctx: Any) -> bool:
+        super(SearchHandler, self).activate(ctx)
 
         start = idc.read_selection_start()
-        end = idc.read_selection_end()
 
-        if start in BAD_OFFSETS or end in BAD_OFFSETS:
-            logger.debug("Nothing selected")
-            idc.warning("Nothing Selected!")
-            return
+        if start in BAD_OFFSETS:
+            # Range isn't selected get the current cursor position
+            start_address = ida_kernwin.get_screen_ea()
+            if start_address in BAD_OFFSETS:
+                logger.debug("Nothing selected..")
+                return False
 
-        if start > end:
-            logger.debug("Start is greater than end")
-            idc.warning("Start is greater than end")
-            return
+            logger.debug("Checking if address contains string")
 
-        code_block = ""
-        search_bytes = []
-        logger.debug(f'Start: {hex(start)} End: {hex(end)}')
+            if not self._is_string_lit(start_address):
+                logger.debug("Not a string literal")
+                return False
 
-        flags = ida_bytes.get_full_flags(start)
-        if not ida_bytes.is_code(flags):
-            size = end - start
-            logger.debug(f"Selected data size: {size}")
-            ibytes = idc.get_bytes(start, size, False)
-            for b in ibytes:
-                search_bytes.append("{0:02x}".format(b))
+            search_string, string_type = self._get_string_lit(start_address)
+            if not search_string:
+                logger.warning("Unable to get string data")
+                return False
 
+            search_type = "ascii"
+            if string_type not in [ida_nalt.STRTYPE_C, ida_nalt.STRTYPE_PASCAL]:
+                search_type = "wide"
+            result = self.unpacme_search.search(search_string, search_type)
+            if self.search_goodware:
+                gw_result = self.unpacme_search.search_goodware(search_string, search_type)
+                result.update(gw_result)
         else:
-            search_bytes, code_block = self._process_selected_code_range(start, end)
 
-        search_str = ''.join(search_bytes)
-        search_str = search_str.replace(" ", "")
-        hex_str = ' '.join(search_str[i:i + 2] for i in range(0, len(search_str), 2))
+            end = idc.read_selection_end()
 
-        if self.preview:
-            dialog = SearchPreview(search_bytes, code_block)
-            preview_result = dialog.exec_()
+            if start in BAD_OFFSETS or end in BAD_OFFSETS:
+                logger.debug("Nothing selected")
+                idc.warning("Nothing Selected!")
+                return False
 
-            if preview_result == QDialog.Accepted:
-                logger.debug(f"Search Bytes: {hex_str}")
-                hex_str = dialog.get_search_pattern()
+            if start > end:
+                logger.debug("Start is greater than end")
+                idc.warning("Start is greater than end")
+                return False
 
-                if not hex_str:
+            code_block = ""
+            search_bytes = []
+            logger.debug(f'Start: {hex(start)} End: {hex(end)}')
+
+            flags = ida_bytes.get_full_flags(start)
+            if not ida_bytes.is_code(flags):
+                size = end - start
+                logger.debug(f"Selected data size: {size}")
+                ibytes = idc.get_bytes(start, size, False)
+                for b in ibytes:
+                    search_bytes.append("{0:02x}".format(b))
+            else:
+                search_bytes, code_block = self._process_selected_code_range(start, end)
+
+            search_str = ''.join(search_bytes)
+            search_str = search_str.replace(" ", "")
+            search_string = ' '.join(search_str[i:i + 2] for i in range(0, len(search_str), 2))
+
+            if self.preview:
+                dialog = SearchPreview(search_bytes, code_block)
+                preview_result = dialog.exec_()
+
+                if preview_result == QDialog.Accepted:
+                    logger.debug(f"Search Bytes: {search_string}")
+                    search_string = dialog.get_search_pattern()
+
+                    if not search_string:
+                        logger.error("No bytes to search")
+                        idc.warning("No bytes to search")
+                        return False
+
+                    result = self.unpacme_search.search(search_string, "hex")
+                    if self.search_goodware:
+                        gw_result = self.unpacme_search.search_goodware(search_string, "hex")
+                        result.update(gw_result)
+                else:
+                    return False
+            else:
+                if not search_string:
                     logger.error("No bytes to search")
                     idc.warning("No bytes to search")
-                    return
+                    return False
 
-                result = self.unpacme_search.search(hex_str, "hex", self.search_goodware)
-            else:
-                return
-        else:
-            if not hex_str:
-                logger.error("No bytes to search")
-                idc.warning("No bytes to search")
+                result = self.unpacme_search.search(search_string, "hex")
+                if self.search_goodware:
+                    gw_result = self.unpacme_search.search(search_string, "hex")
+                    result.update(gw_result)
 
-            result = self.unpacme_search.search(hex_str, "hex", self.search_goodware)
+        if not result:
+            idc.warning("No results found for the pattern.")
+            return False
 
-        if result:
-
-            label_map = {}
-            classification_map = {}
-
-            for r in result['results']:
-                classification_type = ""
-                family = ""
-                for entry in r['malwareid']:
-
-                    label = entry['malware_family']
-                    if not family:
-                        family = label
-
-                    classification = entry['classification_type']
-                    if classification:
-                        classification_type = classification
-
-                if not classification_type:
-                    classification_type = 'UNKNOWN'
-
-                if family in label_map:
-                    label_map[family] += 1
-                else:
-                    label_map[family] = 1
-
-                if classification_type in classification_map:
-                    classification_map[classification_type] += 1
-                else:
-                    classification_map[classification_type] = 1
-            try:
-                classification_map['GOODWARE'] = result['matched_goodware_files']
-            except KeyError:
-                classification_map['GOODWARE'] = 0
-
-            result['label_map'] = label_map
-            result['classification_map'] = classification_map
-            logger.info(classification_map)
-            logger.info(label_map)
-
-            if self.result_widget:
-                self.result_widget.Close(ida_kernwin.PluginForm.WCLS_CLOSE_LATER)
-
-            self.result_widget = UnpacMeResultWidget(hex_str, result)
-            self.result_widget.Show("UnpacMe Search")
-            if "warning" in result.keys():
-                idc.warning(result['warning'])
-
+        self.build_result(result, search_string)
         return True
 
     def term(self):
         pass
+
+
+class StringWindowHandler(BaseSearchHandler):
+    def __init__(self, search_goodware: bool):
+        super(StringWindowHandler, self).__init__()
+        self.search_goodware = search_goodware
+        self.unpacme_search = None
+        self.result_widget = None
+
+    def activate(self, ctx):
+        super(StringWindowHandler, self).activate(ctx)
+
+        # for selection in ctx.chooser_selection:
+        _, string_size, string_type, search_string = ida_kernwin.get_chooser_data(
+            ctx.widget_title,
+            ctx.chooser_selection[0]
+        )
+
+        search_string = search_string.replace("\\\\", "\\")
+
+        logger.info(f"Selected String: {search_string}")
+        logger.debug(f"String Size: {string_size}")
+        logger.debug(f"String Type: {string_type}")
+
+        search_type = "ascii"
+
+        # TODO sort this out
+        if string_type not in ['C', 'PASCAL']:
+            search_type = "wide"
+        result = self.unpacme_search.search(search_string, search_type)
+        if self.search_goodware:
+            gw_result = self.unpacme_search.search_goodware(search_string, search_type)
+            result.update(gw_result)
+
+        if not result or 'results' not in result.keys():
+            idc.warning("No results found for the pattern.")
+            return False
+
+        self.build_result(result, search_string)
+
+        return True
+
+    def update(self, ctx):
+        if ida_kernwin.get_widget_type(ctx.widget) == ida_kernwin.BWN_STRINGS:
+            return ida_kernwin.AST_ENABLE_FOR_WIDGET
+        return ida_kernwin.AST_DISABLE_FOR_WIDGET
 
 
 class UnpacMeByteSearchPlugin(ida_idaapi.plugin_t):
@@ -910,7 +1088,7 @@ class UnpacMeByteSearchPlugin(ida_idaapi.plugin_t):
     wanted_name = "UnpacMe Byte Search"
     wanted_hotkey = ""
 
-    _version = "1.0.2"
+    _version = "1.1.0"
 
     def _banner(self):
         return f"""
@@ -920,6 +1098,11 @@ class UnpacMeByteSearchPlugin(ida_idaapi.plugin_t):
         ##################
         """
 
+    def __init__(self):
+        self.config = None
+        self.search_handler = None
+        self.string_window_handler = None
+
     def init(self):
         try:
             ida_kernwin.msg(self._banner())
@@ -928,6 +1111,7 @@ class UnpacMeByteSearchPlugin(ida_idaapi.plugin_t):
             logger.setLevel(logging._checkLevel(self.config['loglevel'].upper()))
 
             self.search_handler = SearchHandler(self.config['preview'], self.config['auto'], self.config['goodware'])
+            self.string_window_handler = StringWindowHandler(self.config['goodware'])
 
             if self.config.pop('default', False):
                 logger.info("Running default configuration")
@@ -944,6 +1128,13 @@ class UnpacMeByteSearchPlugin(ida_idaapi.plugin_t):
                     self.search_handler,
                     "Shift-Alt-s",
                     "UnpacMe Byte Search",
+                    UPMS_MENU_ICON),
+                ida_kernwin.action_desc_t(
+                    "unpacme_string_search",
+                    "UnpacMe String Search",
+                    self.string_window_handler,
+                    "",
+                    "UnpacMe String Search",
                     UPMS_MENU_ICON)
             ]
 
@@ -958,6 +1149,7 @@ class UnpacMeByteSearchPlugin(ida_idaapi.plugin_t):
 
             self.menus = Menus()
             self.menus.hook()
+
             logger.info("UnpacmeSearchPlugin initialized.")
 
         except Exception as ex:
@@ -1040,8 +1232,13 @@ class Menus(ida_kernwin.UI_Hooks):
 
     def finish_populating_widget_popup(self, form, popup):
 
-        if ida_kernwin.get_widget_type(form) == ida_kernwin.BWN_DISASM:
+        if idaapi.BWN_DISASM:
             ida_kernwin.attach_action_to_popup(form, popup, "unpacme_search", "UnpacMe Byte Search")
+
+        if idaapi.BWN_STRINGS:
+            ida_kernwin.attach_action_to_popup(form, popup, "unpacme_string_search", "UnpacMe String Search")
+
+
 
 
 def PLUGIN_ENTRY():

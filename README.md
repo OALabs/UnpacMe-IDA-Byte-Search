@@ -34,6 +34,15 @@ When the `Search Preview` option is enabled, the plugin will display a preview o
     <img width="600" alt="Example Results" src="imgs/search_preview.png?raw=true">
 </p>
 
+### String Searching 
+
+To search for a specific string select the string within the _Strings subview_ or the address where is referenced. 
+
+<p align="center">
+    <img width="600" alt="String Search" src="imgs/string_search_example.png?raw=true">
+</p>
+
+
 ### Results
 
 The results window shows a summary of the search results, followed by a table of the raw results. If the pattern is a
@@ -53,7 +62,6 @@ The plugin has the following configuration options that can be set via the plugi
 <p align="center">
     <img width="400" alt="Example Results" src="imgs/config.png?raw=true">
 </p>
-
 
  - **API Key** - Your Unpac.me API key. This can be found in your account settings on [Unpac.me](https://www.unpac.me/account#/). We use the keyring module
 to store the API token within the system keyring.
