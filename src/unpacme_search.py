@@ -453,6 +453,8 @@ class UnpacMeResultWidget(idaapi.PluginForm):
                     if entry['malware_family'].lower() not in family_lower:
                         family_lower.append(entry['malware_family'].lower())
                         malware_family.append(entry['malware_family'])
+                except KeyError:
+                    logger.debug("No malware family")
                 except AttributeError:
                     logger.debug("No malware family")
 
@@ -653,11 +655,11 @@ class BaseSearchHandler(ida_kernwin.action_handler_t):
             family = ""
             for entry in r['malwareid']:
 
-                label = entry['malware_family']
+                label = entry.get('malware_family', None)
                 if not family:
                     family = label
 
-                classification = entry['classification_type']
+                classification = entry.get('classification_type', None)
                 if classification:
                     classification_type = classification
 
@@ -1088,7 +1090,7 @@ class UnpacMeByteSearchPlugin(ida_idaapi.plugin_t):
     wanted_name = "UnpacMe Byte Search"
     wanted_hotkey = ""
 
-    _version = "1.1.0"
+    _version = "1.1.1"
 
     def _banner(self):
         return f"""

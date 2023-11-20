@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.1.1 - 2023-11-19
+ - Bugfix: Fix issue with results that do not have a malware_family or classification property 
+
 ## 1.1.0 - 2023-10-09
 
  - Added support for String Searching
